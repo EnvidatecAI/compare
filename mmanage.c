@@ -164,7 +164,7 @@ static int find_remove_frame(void);
  *
  *  @return     void 
  ****************************************************************************************/
-static void cleanup(void) ;
+static void cleanup(void);
 
 /**
  *****************************************************************************************
@@ -196,144 +196,307 @@ static void print_usage_info_and_exit(char *err_str);
 
 static struct vmem_struct *vmem = NULL; //!< Reference to shared memory
 static int signal_number = 0;           //!< Number of signal received last
-static sem_t *local_sem;                //!< OS-X Named semaphores will be stored locally due to pointer
+static sem_t *local_sem; //!< OS-X Named semaphores will be stored locally due to pointer
+static int oldestFrame = -1;
+struct logevent log;
+int clockpointer=0;
 
 int main(int argc, char **argv) {
-    struct sigaction sigact;
+	struct sigaction sigact;
 
-    init_pagefile(); // init page file
-    open_logger();   // open logfile
+	init_pagefile(); // init page file
+	open_logger();   // open logfile
 
-    /* Create shared memory and init vmem structure */
-    vmem_init();
-    TEST_AND_EXIT_ERRNO(!vmem, "Error initialising vmem");
-    PRINT_DEBUG((stderr, "vmem successfully created\n"));
+	/* Create shared memory and init vmem structure */
+	vmem_init();
+	TEST_AND_EXIT_ERRNO(!vmem, "Error initialising vmem");
+	PRINT_DEBUG((stderr, "vmem successfully created\n"));
 
-    // scan parameter 
-    vmem->adm.program_name = argv[0];
-    vmem->adm.page_rep_algo = VMEM_ALGO_FIFO;
-    scan_params(argc, argv);
+	// scan parameter
+	vmem->adm.program_name = argv[0];
+	vmem->adm.page_rep_algo = VMEM_ALGO_AGING;
+	scan_params(argc, argv);
 
-    /* Setup signal handler */
-    sigact.sa_handler = sighandler;
-    sigemptyset(&sigact.sa_mask);
-    sigact.sa_flags = 0;
+	/* Setup signal handler */
+	sigact.sa_handler = sighandler;
+	sigemptyset(&sigact.sa_mask);
+	sigact.sa_flags = 0;
 
-    TEST_AND_EXIT_ERRNO(sigaction(SIGUSR1, &sigact, NULL) == -1, "Error installing signal handler for USR1");
-    PRINT_DEBUG((stderr, "USR1 handler successfully installed\n"));
+	TEST_AND_EXIT_ERRNO(sigaction(SIGUSR1, &sigact, NULL) == -1,
+			"Error installing signal handler for USR1");
+	PRINT_DEBUG((stderr, "USR1 handler successfully installed\n"));
 
-    TEST_AND_EXIT_ERRNO(sigaction(SIGUSR2, &sigact, NULL) == -1, "Error installing signal handler for USR2");
-    PRINT_DEBUG((stderr,  "USR2 handler successfully installed\n"));
+	TEST_AND_EXIT_ERRNO(sigaction(SIGUSR2, &sigact, NULL) == -1,
+			"Error installing signal handler for USR2");
+	PRINT_DEBUG((stderr, "USR2 handler successfully installed\n"));
 
-    TEST_AND_EXIT_ERRNO(sigaction(SIGINT, &sigact, NULL) == -1, "Error installing signal handler for INT");
-    PRINT_DEBUG((stderr, "INT handler successfully installed\n"));
+	TEST_AND_EXIT_ERRNO(sigaction(SIGINT, &sigact, NULL) == -1,
+			"Error installing signal handler for INT");
+	PRINT_DEBUG((stderr, "INT handler successfully installed\n"));
 
-    /* Signal processing loop */
-    while(1) {
-        signal_number = 0;
-        pause();
-        if(signal_number == SIGUSR1) {  /* Page fault */
-            PRINT_DEBUG((stderr, "Processed SIGUSR1\n"));
-            signal_number = 0;
-        }
-        else if(signal_number == SIGUSR2) {     /* PT dump */
-            PRINT_DEBUG((stderr, "Processed SIGUSR2\n"));
-            signal_number = 0;
-        }
-        else if(signal_number == SIGINT) {
-            PRINT_DEBUG((stderr, "Processed SIGINT\n"));
-        }
-    }
+	/* Signal processing loop */
+	while (1) {
+		signal_number = 0;
+		pause();
+		if (signal_number == SIGUSR1) { /* Page fault */
+			PRINT_DEBUG((stderr, "Processed SIGUSR1\n"));
+			signal_number = 0;
+		} else if (signal_number == SIGUSR2) { /* PT dump */
+			PRINT_DEBUG((stderr, "Processed SIGUSR2\n"));
+			signal_number = 0;
+		} else if (signal_number == SIGINT) {
+			PRINT_DEBUG((stderr, "Processed SIGINT\n"));
+		}
+	}
 
-    return 0;
+	return 0;
 }
 
 void scan_params(int argc, char **argv) {
-    int i = 0;
-    unsigned char param_ok = FALSE;
+	int i = 0;
+	unsigned char param_ok = FALSE;
 
-    // scan all parameters (argv[0] points to program name)
-    if (argc > 2) print_usage_info_and_exit("Wrong number of parameters.\n");
+	// scan all parameters (argv[0] points to program name)
+	if (argc > 2)
+		print_usage_info_and_exit("Wrong number of parameters.\n");
 
-    for (i = 1; i < argc; i++) {
-        param_ok = FALSE;
-        if (0 == strcasecmp("-fifo", argv[i])) {
-            // page replacement strategies fifo selected 
-            vmem->adm.page_rep_algo = VMEM_ALGO_FIFO;
-            param_ok = TRUE;
-        }
-        if (0 == strcasecmp("-clock", argv[i])) {
-            // page replacement strategies clock selected 
-            vmem->adm.page_rep_algo = VMEM_ALGO_CLOCK;
-            param_ok = TRUE;
-        }
-        if (0 == strcasecmp("-aging", argv[i])) {
-            // page replacement strategies aging selected 
-            vmem->adm.page_rep_algo = VMEM_ALGO_AGING;
-            param_ok = TRUE;
-        }
-        if (!param_ok) print_usage_info_and_exit("Undefined parameter.\n"); // undefined parameter found
-    } // for loop
+	for (i = 1; i < argc; i++) {
+		param_ok = FALSE;
+		if (0 == strcasecmp("-fifo", argv[i])) {
+			// page replacement strategies fifo selected
+			vmem->adm.page_rep_algo = VMEM_ALGO_FIFO;
+			param_ok = TRUE;
+		}
+		if (0 == strcasecmp("-clock", argv[i])) {
+			// page replacement strategies clock selected
+			vmem->adm.page_rep_algo = VMEM_ALGO_CLOCK;
+			param_ok = TRUE;
+		}
+		if (0 == strcasecmp("-aging", argv[i])) {
+			// page replacement strategies aging selected
+			vmem->adm.page_rep_algo = VMEM_ALGO_AGING;
+			param_ok = TRUE;
+		}
+		if (!param_ok)
+			print_usage_info_and_exit("Undefined parameter.\n"); // undefined parameter found
+	} // for loop
 }
 
 void print_usage_info_and_exit(char *err_str) {
-    fprintf(stderr, "Wrong parameter: %s\n", err_str);
-    fprintf(stderr, "Usage : %s [OPTIONS]\n", vmem->adm.program_name);
-    fprintf(stderr, " -fifo     : Fifo page replacement algorithm.\n");
-    fprintf(stderr, " -clock    : Clock page replacement algorithm.\n");
-    fprintf(stderr, " -aging    : Aging page replacement algorithm.\n");
-    fprintf(stderr, " -pagesize=[8,16,32,64] : Page size.\n");
-    fflush(stderr);
-    exit(EXIT_FAILURE);
+	fprintf(stderr, "Wrong parameter: %s\n", err_str);
+	fprintf(stderr, "Usage : %s [OPTIONS]\n", vmem->adm.program_name);
+	fprintf(stderr, " -fifo     : Fifo page replacement algorithm.\n");
+	fprintf(stderr, " -clock    : Clock page replacement algorithm.\n");
+	fprintf(stderr, " -aging    : Aging page replacement algorithm.\n");
+	fprintf(stderr, " -pagesize=[8,16,32,64] : Page size.\n");
+	fflush(stderr);
+	exit(EXIT_FAILURE);
 }
 
 void sighandler(int signo) {
-    signal_number = signo;
-    if(signo == SIGUSR1) {
-        allocate_page();
-    } else if(signo == SIGUSR2) {
-        dump_pt();
-    } else if(signo == SIGINT) {
-        cleanup();
-        exit(EXIT_SUCCESS);
-    }  
+	signal_number = signo;
+	if (signo == SIGUSR1) {
+		allocate_page();
+		sem_post(local_sem);
+	} else if (signo == SIGUSR2) {
+		dump_pt();
+	} else if (signo == SIGINT) {
+		cleanup();
+		exit(EXIT_SUCCESS);
+	}
 }
 
 /* Your code goes here... */
-
+///////////////////////////////////////////////////////////////////////////////
 void vmem_init(void) {
+	int i;
+
+	// initialisiere Shared Memory
+	int sharedMemoryId = shmget(ftok(SHMKEY, SHMPROCID), sizeof(struct vmem_struct), IPC_CREAT | 0666);
+	if (sharedMemoryId < 0) {
+		perror("mmanage.c kann shared memory nicht erstellen");
+		exit(1);
+	}
+	vmem = (struct vmem_struct *) shmat(sharedMemoryId, 0, 0);
+	if (vmem < 0) {
+		perror("mmanage.c kann shared memory nicht erstellen");
+		exit(1);
+	}
+
+	// initialisiere die Admin Struktur
+	vmem->adm.size = VMEM_VIRTMEMSIZE;
+	vmem->adm.mmanage_pid = getpid();
+	vmem->adm.shm_id = sharedMemoryId;
+	vmem->adm.req_pageno = 0;
+	vmem->adm.next_alloc_idx = 0;
+	vmem->adm.pf_count = 0;
+	vmem->adm.g_count = 0;
+
+	// initialisiere Page-Frame-Tabelle
+	for (i = 0; i < VMEM_NPAGES; i++) {
+		vmem->pt.entries[i].flags = 0;
+		vmem->pt.entries[i].frame = VOID_IDX;
+		vmem->pt.entries[i].count = 0;
+		vmem->pt.entries[i].age = 0;
+	}
+
+	// initialisiere Frames
+	for (i = 0; i < VMEM_NPAGES; i++) {
+		vmem->pt.framepage[i] = VOID_IDX;
+	}
+
+	// initialisiere Frames Hauptspeicher
+	for (i = 0; i < VMEM_NFRAMES * VMEM_PAGESIZE; i++) {
+		vmem->data[i] = 0;
+	}
+
+	//initialisiere Semaphore
+	local_sem = sem_open(NAMED_SEM, O_CREAT, 0777, 0);
+	if (local_sem < 0) {
+		perror("mmanage.c kann Semaphore nicht erstellen");
+		exit(1);
+	}
 }
 
+///////////////////////////////////////////////////////////////////////////////
 int find_free_frame() {
+	int freeFrame = VOID_IDX;
+	int i;
+	for (i=0; i<VMEM_NFRAMES; i++) {
+		if (vmem->pt.framepage[i] == VOID_IDX) { // suche das erste freie Frame in der Tabelle
+			freeFrame = i;
+			break;
+		}
+	}
+	return freeFrame;
 }
 
+///////////////////////////////////////////////////////////////////////////////
 void allocate_page(void) {
+	int framenummer;
+	int alteseite;
+	int mBit;
+
+	vmem->adm.pf_count++;
+	framenummer = find_free_frame();
+
+	// wenn alle Frames schon belegt sind, muss etwas loeschen
+	if (framenummer == VOID_IDX) {
+		framenummer = find_remove_frame();
+		// schreibe die Seite zurueck ins File, wenn noetig
+		alteseite = vmem->pt.framepage[framenummer];
+		mBit = vmem->pt.entries[alteseite].flags & PTF_DIRTY;
+		if (mBit == PTF_DIRTY) {
+			store_page(alteseite);
+		}
+	}
+	vmem->adm.next_alloc_idx = framenummer;
+
+	// ziehe neue Seite ins Frame
+	update_pt(framenummer);
+	fetch_page(vmem->adm.req_pageno);
+
+	// notiere Pagefault
+	log.req_pageno=vmem->adm.req_pageno;
+	log.replaced_page=alteseite;
+	log.alloc_frame=vmem->adm.next_alloc_idx;
+	log.pf_count=vmem->adm.pf_count;
+	log.g_count=vmem->adm.g_count;
+	logger(log);
 }
 
+///////////////////////////////////////////////////////////////////////////////
 void fetch_page(int pt_idx) {
+	int* dataStart = &(vmem->data[vmem->adm.next_alloc_idx * VMEM_PAGESIZE]);
+	fetch_page_from_pagefile(pt_idx, dataStart);
 }
 
+///////////////////////////////////////////////////////////////////////////////
 void store_page(int pt_idx) {
+	int* dataStart = &(vmem->data[vmem->adm.next_alloc_idx * VMEM_PAGESIZE]);
+	store_page_to_pagefile(pt_idx, dataStart);
 }
 
+///////////////////////////////////////////////////////////////////////////////
 void update_pt(int frame) {
+	int neueSeite = vmem->adm.req_pageno;
+	int alteseite = vmem->pt.framepage[frame];
+
+	if(alteseite != VOID_IDX){
+		vmem->pt.entries[alteseite].frame = VOID_IDX;
+	}
+	vmem->pt.entries[neueSeite].frame = frame;
+	vmem->pt.framepage[frame] = neueSeite;
+	vmem->pt.entries[neueSeite].flags = PTF_PRESENT;
+	vmem->pt.entries[neueSeite].age = AGE_DEFAULT;
 }
 
+///////////////////////////////////////////////////////////////////////////////
 int find_remove_frame(void) {
+	int framenummer = VOID_IDX;
+	switch (vmem->adm.page_rep_algo) {	// suche mit dem gewaehlten Algorithmus
+		case VMEM_ALGO_FIFO:
+			framenummer= find_remove_fifo();
+			break;
+		case VMEM_ALGO_AGING:
+			framenummer=find_remove_aging();
+			break;
+		case VMEM_ALGO_CLOCK:
+			framenummer=find_remove_clock();
+			break;
+	}
+	return framenummer;
 }
 
+///////////////////////////////////////////////////////////////////////////////
 int find_remove_fifo(void) {
+	oldestFrame = (oldestFrame + 1) % VMEM_NFRAMES;
+	return oldestFrame;
 }
 
+///////////////////////////////////////////////////////////////////////////////
 int find_remove_aging(void) {
+	int frameToRemove = 0;
+	int smallestAge = AGE_MAX;	// max Wert fuer char
+	int pageInFrame;		// Seite, die im Frame liegt
+	int i;
+	for (i=0; i<VMEM_NFRAMES; i++) {
+		pageInFrame = vmem->pt.framepage[i];
+		if (vmem->pt.entries[pageInFrame].age <= smallestAge) {	// suche ein Frame mit dem kleinsten Age
+			smallestAge = vmem->pt.entries[pageInFrame].age;
+			frameToRemove = i;
+		}
+	}
+	return frameToRemove;
 }
 
+///////////////////////////////////////////////////////////////////////////////
 int find_remove_clock(void) {
+	int pageInFrame;
+	int rBit;
+	while(1) {	// suche zyklisch bis ein zum loeschen passendes Frame gefunden wird
+		oldestFrame = (oldestFrame + 1) % VMEM_NFRAMES;
+		pageInFrame = vmem->pt.framepage[oldestFrame];
+		rBit = vmem->pt.entries[pageInFrame].flags & PTF_REF;
+		if (rBit == 0) {
+			break;	// gefunden
+		} else {
+			vmem->pt.entries[pageInFrame].flags = vmem->pt.entries[pageInFrame].flags ^ rBit; // setze das R Bit
+		}
+	}
+	return oldestFrame;
 }
 
 void cleanup(void) {
+	sem_close(local_sem);
+	shmctl(vmem->adm.shm_id, IPC_RMID, 0);	//shm zerstören
 }
 
 void dump_pt(void) {
+	int i;
+	printf("%d. Pagefault\n", vmem->adm.pf_count);
+	for (i=0; i<VMEM_NFRAMES; i++) {
+		printf("Frame; %d, Page: %d\n", i, vmem->pt.framepage[i]);
+	}
 }
 // EOF

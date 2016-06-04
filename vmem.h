@@ -78,6 +78,11 @@ struct pt_entry {
    unsigned char age;     //!< 8 bit counter for aging page replacement algorithm
 };
 
+//Kostanten
+#define BIT_SHIFT 32
+#define AGE_MAX 0xFF
+#define AGE_DEFAULT 0x80
+
 /**
  * Structure of all administration data stored in shared memory
  */

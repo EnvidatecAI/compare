@@ -48,7 +48,7 @@ void fetch_page_from_pagefile(int pt_idx, int *frame_start) {
 
 void store_page_to_pagefile(int pt_idx, int *frame_start) {
     // check page number pt_itx
-    TEST_AND_EXIT(pt_idx <  0,           (stderr, "store_page: pt_idx out of range\n"));
+    TEST_AND_EXIT(pt_idx <  0,           (stderr, "store_page: pt_idx out of range\n%d",pt_idx));
     TEST_AND_EXIT(pt_idx >= VMEM_NPAGES, (stderr, "store_page: pt_idx out of range\n"));
 
 

@@ -11,6 +11,7 @@
 #include "vmaccess.h"
 #include "vmappl.h"
 #include "mytypes.h"
+#include "semaphore.h"
 
 /* 
  * Signatures of private (static) functions of this module.
